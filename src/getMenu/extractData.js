@@ -1,5 +1,9 @@
 import getMenuData from "./extractMenu.js";
 import { Logger } from "../lib/Logger.js";
+import { log } from "console";
+
+// Utility to pick the first non-undefined, non-null value
+const pickFirst = (...vals) => vals.find(v => v !== undefined && v !== null);
 
 /**
  * The function is used to extract data from given data
@@ -30,24 +34,27 @@ export default function extractData(data, now, latitude, longitude, logger) {
     chain: NaN,
     menu: NaN,
     is_shop_price: NaN,
+    popularityLabel: NaN,
   };
 
-  // uuid and title
+  // uuid and title（避免直接 return 導致整個 menu 變成 undefined）
   try {
-    result.shopCode = data.code;
-    result.shopName = `"${data.name}"`;
+    result.shopCode = pickFirst(data.code, data.uuid, data.id, data?.vendor?.code, data?.restaurant?.code, NaN);
+    const nameVal = pickFirst(data.name, data?.vendor?.name, data?.restaurant?.name);
+    result.shopName = nameVal !== undefined ? `"${nameVal}"` : NaN;
   } catch (e) {
-    return;
+    logger.error(`missing basic identity fields`);
   }
 
-  // location data
+  // location data（容錯不同欄位命名）
   try {
-    result.address = `"${data.address}"`;
-    result.postalCode = data.post_code ? `"${data.post_code}"` : NaN;
-    result.shopLat = data.latitude;
-    result.shopLng = data.longitude;
+    const addr = pickFirst(data.address, data?.location?.address, data?.vendor?.address, data?.restaurant?.address);
+    result.address = addr !== undefined ? `"${addr}"` : NaN;
+    result.postalCode = data.post_code ? `"${data.post_code}"` : (data?.postal_code ? `"${data.postal_code}"` : NaN);
+    result.shopLat = pickFirst(data.latitude, data?.lat, data?.vendor?.latitude, data?.restaurant?.latitude);
+    result.shopLng = pickFirst(data.longitude, data?.lng, data?.vendor?.longitude, data?.restaurant?.longitude);
   } catch (e) {
-    logger.error(`${data.uuid} has no location info`);
+    logger.error(`no location info`);
   }
 
   // waiting-time
@@ -66,17 +73,17 @@ export default function extractData(data, now, latitude, longitude, logger) {
 
   // rating
   try {
-    result.rate = data.rating;
-    result.rateCt = data.rating;
+    result.rate = pickFirst(data.rating, data?.rating_score, data?.vendor?.rating);
+    result.rateCt = pickFirst(data.rating_count, data?.votes, data?.total_ratings, data?.vendor?.rating_count, NaN);
   } catch (e) {
-    logger.error(`${data.uuid} has no rating`);
+    logger.error(`no rating fields`);
   }
 
   // store available?
   try {
-    result.is_delivery_enabled = data.is_delivery_enabled;
+    result.storeAvailabilityStatus = pickFirst(data.storeAvailabilityStatus, data?.is_delivery_enabled, data?.availability_status, NaN);
   } catch (e) {
-    logger.error(`${data.uuid} has no availability`);
+    logger.error(`no store availability field`);
   }
 
   // categories
@@ -97,13 +104,34 @@ export default function extractData(data, now, latitude, longitude, logger) {
   }
 
   // menu
+  let menuArr;
   try {
-    // encoded as base64
-    result.menu = Buffer.from(JSON.stringify(getMenuData(data))).toString(
-      "base64",
-    );
+    menuArr = getMenuData(data);
+    result.menu = Buffer.from(JSON.stringify(menuArr)).toString("base64");
   } catch (e) {
-    logger.error(`${data.uuid} has no menu`);
+    logger.error(`failed to extract menu`);
+    result.menu = Buffer.from(JSON.stringify([])).toString("base64");
+    menuArr = [];
+  }
+
+  // popularityLabel
+  try {
+    const popularityList = Array.isArray(menuArr)
+      ? menuArr.map(it => {
+          if (!it || !Array.isArray(it.tags)) return "normal";
+          // case-insensitive match for the exact "popular" tag
+          const isPopular = it.tags.some(t => typeof t === "string" && t.toLowerCase() === "popular");
+          return isPopular ? "popular" : "normal";
+        })
+      : [];
+    // logger && logger.info(`popularityList: ${JSON.stringify(popularityList)}`);
+    result.popularityLabel = Buffer.from(JSON.stringify(popularityList)).toString("base64");
+  } catch (e2) {
+    logger && logger.error(`failed to build popularityLabel: ${e2?.message ?? e2}`);
+    // even on error, ensure the field exists as an empty list
+    try {
+      result.popularityLabel = Buffer.from(JSON.stringify([])).toString("base64");
+    } catch { /* no-op */ }
   }
 
   // is_shop_price

@@ -76,6 +76,19 @@ export default async function getMenu(
     logger.error(`${shopUuid}, ${latitude}, ${longitude} Failed`);
   }
   const data = await response.json();
+  // normalize payload path（不同 API 版本結構不一樣）
+  const payload =
+    (data && (data.data || data.restaurant || data.vendor || data.result)) || data;
+
+  if (!payload) {
+    logger.error(`${shopUuid} empty response body or missing payload`);
+    // 回傳基本骨架，避免上游看到 undefined
+    try {
+      return extractData({}, now, latitude, longitude, logger);
+    } catch {
+      return {};
+    }
+  }
 
   // write to json
   if (grepJson) {
@@ -93,5 +106,5 @@ export default async function getMenu(
   }
 
   // data conversion
-  return extractData(data.data, now, latitude, longitude, logger);
+  return extractData(payload, now, latitude, longitude, logger);
 }

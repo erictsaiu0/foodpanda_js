@@ -45,6 +45,10 @@ async function main() {
 
   for (const row of df) {
     try {
+      // add random delay to avoid 429
+      const delay = Math.floor(Math.random() * 500) + 500; // 1 to 3 seconds
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      
       const menu = await getMenu(
         row[0],
         row[1],
@@ -54,10 +58,14 @@ async function main() {
         logger,
       );
       try {
-        writeFileSync(
-          `${PATH}/${row[2]}_${row[3]}_${row[0]}.json`,
-          JSON.stringify(menu),
-        );
+        if (menu !== undefined && menu !== null) {
+          writeFileSync(
+            `${PATH}/${row[2]}_${row[3]}_${row[0]}.json`,
+            JSON.stringify(menu),
+          );
+        } else {
+          logger.info(`[SKIP WRITE] ${row[0]} menu is undefined/null`);
+        }
       } catch (error) { }
       stores.push(menu);
     } catch (e) {
@@ -75,7 +83,7 @@ async function main() {
         grepJson,
         logger,
       );
-      try {
+            try {
         writeFileSync(
           `${PATH}/${row[2]}_${row[3]}_${row[0]}.json`,
           JSON.stringify(menu),
