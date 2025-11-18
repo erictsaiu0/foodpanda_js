@@ -2,6 +2,7 @@ import { appendFileSync } from "fs";
 
 export class Logger {
   INFO = "INFO";
+  WARN = "WARN";
   ERROR = "ERROR";
   constructor(path) {
     this.path = path;
@@ -12,6 +13,9 @@ export class Logger {
   }
   info(message) {
     this.log(message, this.INFO);
+  }
+  warn(message) {
+    this.log(message, this.WARN);
   }
   error(message) {
     this.log(message, this.ERROR);

@@ -46,7 +46,7 @@ async function main() {
   for (const row of df) {
     try {
       // add random delay to avoid 429
-      const delay = Math.floor(Math.random() * 1000) + 3000; // 3 to 4 seconds
+      const delay = Math.floor(Math.random() * 1000) + 5000; // 3 to 5 seconds
       await new Promise((resolve) => setTimeout(resolve, delay));
 
       const menu = await getMenu(

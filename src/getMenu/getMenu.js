@@ -3,6 +3,20 @@ import { mkdirSync, writeFileSync } from "fs";
 import extractData from "./extractData.js";
 import { Logger } from "../lib/Logger.js";
 
+const randomDigits = (length) =>
+  Array.from({ length }, () => Math.floor(Math.random() * 10)).join("");
+
+const randomAlphaNum = (length) =>
+  Array.from({ length }, () =>
+    Math.floor(Math.random() * 36).toString(36),
+  ).join("");
+
+const buildPerseusClientId = () =>
+  `${Date.now()}.${randomDigits(18)}.${randomAlphaNum(10)}`;
+
+const buildPerseusSessionId = () =>
+  `${Date.now()}.${randomDigits(18)}.${randomAlphaNum(10)}`;
+
 /**
  *
  * @param {string} shopUuid
@@ -50,14 +64,45 @@ export default async function getMenu(
     },
   );
 
-  const setCookie = get.headers.getSetCookie();
+  logger.info(
+    `[bootstrap] ${shopUuid} html status=${get.status} cookies=${get.headers.get("set-cookie") ? "Y" : "N"}`,
+  );
+
+  const setCookie = get.headers.getSetCookie?.() ?? [];
+  const cookieJar = new Map();
   let perseus_client_id = "";
   let perseus_session_id = "";
   for (const setCookieStr of setCookie) {
-    if (setCookieStr.includes("PerseusGuestId"))
-      perseus_client_id = setCookieStr.split(";")[0].split("=")[1];
-    else if (setCookieStr.includes("PerseusSessionId"))
-      perseus_session_id = setCookieStr.split(";")[0].split("=")[1];
+    const [cookiePair] = setCookieStr.split(";");
+    if (!cookiePair) continue;
+    const eqIndex = cookiePair.indexOf("=");
+    if (eqIndex <= 0) continue;
+    const key = cookiePair.slice(0, eqIndex).trim();
+    const value = cookiePair.slice(eqIndex + 1).trim();
+    if (!key) continue;
+    cookieJar.set(key, value);
+    if (key === "PerseusGuestId") perseus_client_id = value;
+    else if (key === "PerseusSessionId") perseus_session_id = value;
+  }
+
+  if (!perseus_client_id || !perseus_session_id) {
+    logger.warn(
+      `[${shopUuid}] missing perseus cookie (client: ${perseus_client_id}, session: ${perseus_session_id})`,
+    );
+  }
+  if (!perseus_client_id) {
+    perseus_client_id = buildPerseusClientId();
+    cookieJar.set("PerseusGuestId", perseus_client_id);
+  }
+  if (!perseus_session_id) {
+    perseus_session_id = buildPerseusSessionId();
+    cookieJar.set("PerseusSessionId", perseus_session_id);
+  }
+  const cookieHeader = Array.from(cookieJar.entries())
+    .map(([key, value]) => `${key}=${value}`)
+    .join("; ");
+  if (!cookieHeader) {
+    logger.warn(`[${shopUuid}] html response did not return any cookies`);
   }
 
   let now = new Date();
@@ -67,15 +112,35 @@ export default async function getMenu(
     shopUuid,
     latitude,
     longitude,
-    "1751293229242.035865992059667991.ctokxyw375",
-    "1751299673870.686325495878323394.2hc61mq3mq",
+    perseus_client_id,
+    perseus_session_id,
+    cookieHeader,
     logger,
   );
-  logger.info(shopUuid, latitude, longitude, response.status);
   if (!response) {
-    logger.error(`${shopUuid}, ${latitude}, ${longitude} Failed`);
+    const error = new Error(
+      `${shopUuid}, ${latitude}, ${longitude} request failed`,
+    );
+    logger.error(error.message);
+    throw error;
   }
+  logger.info(
+    `[api] ${shopUuid} (${latitude}, ${longitude}) status=${response.status}`,
+  );
   const data = await response.json();
+
+  const blockedByPerimeterX =
+    data &&
+    typeof data === "object" &&
+    data.appId &&
+    data.jsClientSrc &&
+    data.blockScript;
+  if (blockedByPerimeterX) {
+    const error = new Error(`[${shopUuid}] blocked by PerimeterX`);
+    logger.warn(error.message);
+    throw error;
+  }
+
   // normalize payload path（不同 API 版本結構不一樣）
   const payload =
     (data && (data.data || data.restaurant || data.vendor || data.result)) || data;
